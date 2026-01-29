@@ -46,4 +46,5 @@ else
 fi
 
 echo "Open: http://localhost:${port}/"
+echo "Docs: http://localhost:${port}/docs"
 exec cog serve "${args[@]}"
