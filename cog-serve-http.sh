@@ -22,8 +22,28 @@ EOF
   exit 0
 fi
 
-if [ "$#" -eq 0 ]; then
-  set -- -p "${PORT:-5000}"
+port="${PORT:-}"
+args=("$@")
+
+if [ "${#args[@]}" -eq 0 ]; then
+  port="${port:-8393}"
+  args=(-p "$port")
+else
+  # Parse -p/--port flags if provided
+  for ((i=0; i<${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      -p|--port)
+        if [ $((i+1)) -lt ${#args[@]} ]; then
+          port="${args[$((i+1))]}"
+        fi
+        ;;
+      --port=*)
+        port="${args[$i]#--port=}"
+        ;;
+    esac
+  done
+  port="${port:-8393}"
 fi
 
-exec cog serve "$@"
+echo "Open: http://localhost:${port}/"
+exec cog serve "${args[@]}"
