@@ -106,6 +106,16 @@ easytier-core ... --file-foreign-limit 5
 | `--file-foreign-limit` | u64 (MB) | `10` | 跨网中继最大文件限制（更严格） | [`core.rs:657`](../easytier/src/core.rs#L657) |
 | `--enable-file-relay` | bool | `false` | 中继节点是否转发文件传输请求 | [`core.rs:661`](../easytier/src/core.rs#L661) |
 
+#### 限流策略详解 (Limit Hierarchy)
+
+为了平衡私有网络的灵活性和公共中继的安全性，限制策略采用**层层过滤**机制，而非简单的参数覆盖：
+
+1. **总开关 (`--enable-file-relay`)**：优先级最高。若为 `false`，拒绝所有中继传输。
+2. **私有中继**：受 `--file-relay-limit` 限制（默认 100MB）。
+3. **公共/跨网中继**：**同时**受 `--file-relay-limit` 和 `--file-foreign-limit` 限制。实际生效限额为两者的**最小值**（通常取决于更严格的 `--file-foreign-limit`，默认 10MB）。
+
+这种设计确保了即使你配置了宽松的中继策略，跨网流量依然会被默认的严格策略拦截，防止带宽滥用。
+
 ### 为什么不更新 README？(Why No README Update?)
 
 此功能当前处于 **CLI-only 验证阶段**，暂未更新项目主 README 文档，主要考虑：
@@ -141,6 +151,25 @@ easytier-core ... --file-foreign-limit 5
 - [x] `test_transfer_resumability` - 断点续传测试
 
 </details>
+
+### 演示Demo
+
+我编写了完整的测试套件和交互式演示脚本来验证功能：
+
+1. **自动化测试**：
+   位于 `easytier-test/` 目录下，包含基础 P2P、中继策略、断点续传等测试。
+   ```bash
+   # 运行全量测试
+   ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
+   ```
+   *注：不带参数运行将跳过需外部中继的测试用例。*
+
+2. **交互式演示**：
+   位于 `scripts/` 目录下，用于手动体验传输流程。
+   ```powershell
+   # 启动两个本地节点进行文件传输演示
+   ./scripts/demo_file_transfer_p2p.ps1
+   ```
 
 ---
 
@@ -254,6 +283,16 @@ This PR introduces 5 new parameters, all defaulting to off/conservative:
 | `--file-foreign-limit` | u64 (MB) | `10` | Max file size via foreign relay (stricter) | [`core.rs:657`](../easytier/src/core.rs#L657) |
 | `--enable-file-relay` | bool | `false` | Whether relay nodes forward file transfer RPCs | [`core.rs:661`](../easytier/src/core.rs#L661) |
 
+#### Limit Hierarchy Explained
+
+To balance private network flexibility with public relay security, the limit policy uses a **multi-layered filtering** mechanism rather than simple parameter overwriting:
+
+1. **Master Switch (`--enable-file-relay`)**: Highest priority. If `false`, all relayed transfers are rejected.
+2. **Private Relay**: Subject to `--file-relay-limit` (default 100MB).
+3. **Public/Foreign Relay**: Subject to **BOTH** `--file-relay-limit` and `--file-foreign-limit`. The effective limit is the **minimum** of the two (usually the stricter `--file-foreign-limit`, default 10MB).
+
+This design ensures that even if you configure a generous relay policy for your own nodes, cross-network traffic remains restricted by default to prevent bandwidth abuse.
+
 ### Why No README Update?
 
 This feature is currently in **CLI-only validation phase** and has not been added to the main README, for these reasons:
@@ -277,7 +316,55 @@ Implemented using gRPC-like definitions in [`file_transfer.proto`](../easytier/s
 
 ## Test Coverage
 
-All test scripts are in `easytier-test/` and pass:
+<details>
+<summary>Click to view test details</summary>
+
+- [x] `test_transfer_p2p_basic` - Basic P2P transfer
+- [x] `test_transfer_p2p_large` - 20MB file handling
+- [x] `test_transfer_relay_policy` - Relay control policies
+- [x] `test_transfer_relay_limits` - Size limit enforcement
+- [x] `test_transfer_security_gates` - Private mode & switches
+- [x] `test_transfer_resumability` - Interrupt/Resume logic
+
+</details>
+
+### Demo
+
+I have included a comprehensive test suite and an interactive demo script:
+
+1. **Automated Tests**:
+   Located in `easytier-test/`, covering P2P transfer, relay policies, resumability, etc.
+   ```bash
+   # Run full test suite (requires external relay for some tests)
+   ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
+   ```
+   *Note: Running without arguments skips tests requiring an external relay.*
+
+2. **Interactive Demo**:
+   Located in `scripts/`, for manual verification of the user experience.
+   ```powershell
+   # Start two local nodes for file transfer demo
+   ./scripts/demo_file_transfer_p2p.ps1
+   ```
+
+All test scripts pass locally.
+ript:
+
+1. **Automated Tests**:
+   Located in `easytier-test/`, covering P2P transfer, relay policies, resumability, etc.
+   ```bash
+   # Run full test suite
+   ./easytier-test/run_tests.ps1
+   ```
+
+2. **Interactive Demo**:
+   Located in `scripts/`, for manual verification of the user experience.
+   ```powershell
+   # Start two local nodes for file transfer demo
+   ./scripts/demo_file_transfer_p2p.ps1
+   ```
+
+All test scripts pass locally.
 
 <details>
 <summary>Click to view test details</summary>
