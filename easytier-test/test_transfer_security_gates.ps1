@@ -92,3 +92,4 @@ Assert-Rejection $rpcA $peerId "gate_test.txt" "private mode"
 
 Run-Cleanup
 Log-Success "All Gate Tests Verified!"
+exit 0

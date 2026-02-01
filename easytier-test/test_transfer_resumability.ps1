@@ -116,3 +116,4 @@ if (Test-Path $metaPath) { throw ".meta file not cleaned up." }
 
 Run-Cleanup
 Log-Success "Resume Verify Passed"
+exit 0

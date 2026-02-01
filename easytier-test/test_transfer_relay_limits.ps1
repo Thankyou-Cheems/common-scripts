@@ -81,8 +81,8 @@ Start-ETNode -Name "node_b" -RpcPort $rpcB -TcpPort $portB `
     -Peers @("tcp://${HostIP}:$portC") `
     -ExtraArgs @(
     "--disable-p2p", "--enable-file-transfer", "--private-mode", "true",
-    "--file-transfer-relay-size-limit", "5120", 
-    "--file-transfer-foreign-network-relay-limit", "1024"
+    "--file-relay-limit", "5120", 
+    "--file-foreign-limit", "1024"
 ) `
     -WorkDir $NodeBDir
 
@@ -112,7 +112,7 @@ if ($UseLocalForeignRelay) {
         -ExtraArgs @(
         "--network-name", "foreign_net",
         "--relay-all-peer-rpc", "true", 
-        "--enable-file-transfer-relay-forward", "true"
+        "--enable-file-relay", "true"
     ) `
         -WorkDir $NodeCDir
     Wait-PortListen $portC 10
@@ -133,8 +133,8 @@ Start-ETNode -Name "node_b" -RpcPort $rpcB -TcpPort $portB `
     -Peers @("tcp://${foreignRelayHost}:${foreignRelayPort}") `
     -ExtraArgs @(
     "--disable-p2p", "--enable-file-transfer", "--private-mode", "true",
-    "--file-transfer-relay-size-limit", "20480", 
-    "--file-transfer-foreign-network-relay-limit", "1024"
+    "--file-relay-limit", "20480", 
+    "--file-foreign-limit", "1024"
 ) `
     -WorkDir $NodeBDir
 
@@ -147,3 +147,4 @@ Assert-Transfer $rpcA $peerId "relay_small.dat" $false
 
 Run-Cleanup
 Log-Success "All Limit Tests Completed Successfully"
+exit 0

@@ -1,5 +1,5 @@
 param(
-    [string]$LanIp = ""
+  [string]$LanIp = ""
 )
 
 . (Join-Path $PSScriptRoot "_common.ps1")
@@ -58,3 +58,4 @@ Assert-FileHashMatch $LargeFile $recvPath
 
 Run-Cleanup
 Log-Success "Large P2P Test Verify Passed"
+exit 0

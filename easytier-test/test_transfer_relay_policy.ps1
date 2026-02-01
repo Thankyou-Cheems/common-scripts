@@ -50,7 +50,7 @@ function Setup-RelayNode {
             -ExtraArgs @(
             "--network-name", "foreign_net",
             "--relay-all-peer-rpc", "true", 
-            "--enable-file-transfer-relay-forward", "true"
+            "--enable-file-relay", "true"
         ) `
             -WorkDir $NodeCDir
         Wait-PortListen $portC 10
@@ -134,3 +134,4 @@ else {
 Start-Sleep -Seconds 2
 Run-Cleanup
 Log-Success "All Relay Tests Completed Successfully"
+exit 0

@@ -50,3 +50,4 @@ Assert-FileHashMatch "test_p2p.txt" $recvPath
 Log-Step "Teardown"
 Stop-EasyTierCluster
 Log-Success "Test PASSED: P2P File Transfer"
+exit 0
