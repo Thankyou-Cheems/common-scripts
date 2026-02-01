@@ -37,7 +37,7 @@
 
 1. **保护公共中继**：目前的中继节点无法区分普通流量和文件传输流量。合并此 PR 后，中继节点可以通过 `--enable-file-relay false`（默认值）来明确拒绝文件传输请求，保护带宽资源。
 2. **无破坏性变更**：所有新参数都是 **Opt-in**（默认关闭）的。现有部署升级后，如果不手动开启 `--enable-file-transfer`，行为完全一致。
-3. **小规模验证**：通过 CLI 先行发布，可以收集真实网络环境下的反馈，为未来可能得 GUI 集成积累经验。
+3. **小规模验证**：通过 CLI 先行发布，可以收集真实网络环境下的反馈，为未来可能的 GUI 集成积累经验。
 
 ---
 
@@ -77,44 +77,58 @@ easytier-cli file send <PEER_ID> ./my_file.zip
 对于自建中继服务器，如果你想允许文件转发但限制大小：
 
 ```bash
-# 允许最大 100MB 的文件通过中继
+# 允许最大 100MB (104,857,600 Bytes) 的文件通过中继
 easytier-core --relay-all-peer-rpc true \
               --enable-file-relay true \
-              --file-relay-limit 100
+              --file-relay-limit 104857600
 ```
 
 对于公共中继，建议保持默认（关闭文件转发），或者设置极小的限制（如 5MB）：
 
 ```bash
-# 仅允许传输小文件
-easytier-core ... --file-foreign-limit 5
+# 仅允许传输小文件 (5MB = 5,242,880 Bytes)
+easytier-core ... --file-foreign-limit 5242880
 ```
 
 ---
 
 ## 详细变更 (Detailed Changes)
 
-### 新增配置参数 (New Configuration Parameters)
+### 配置参数说明 (Configuration Parameters)
 
-本 PR 引入了 5 个新的配置参数，全部默认为关闭/保守策略：
+本 PR 引入了 4 个新的配置参数，并复用了现有的 `--private-mode`，全部默认为关闭/保守策略：
 
 | 参数名 | 类型 | 默认值 | 用途 | 源码位置 |
 |--------|------|--------|------|----------|
-| `--enable-file-transfer` | bool | `false` | 文件传输总开关 | [`core.rs:646`](../easytier/src/core.rs#L646) |
-| `--private-mode` | bool | `false` | 强制隐私模式（文件传输前置要求） | [`core.rs:596`](../easytier/src/core.rs#L596) |
-| `--file-relay-limit` | u64 (MB) | `100` | 私有中继最大文件限制 | [`core.rs:654`](../easytier/src/core.rs#L654) |
-| `--file-foreign-limit` | u64 (MB) | `10` | 跨网中继最大文件限制（更严格） | [`core.rs:657`](../easytier/src/core.rs#L657) |
-| `--enable-file-relay` | bool | `false` | 中继节点是否转发文件传输请求 | [`core.rs:661`](../easytier/src/core.rs#L661) |
+| `--enable-file-transfer` | bool | `false` | [新增] 文件传输总开关 | [`core.rs:646`](../easytier/src/core.rs#L646) |
+| `--private-mode` | bool | `false` | [依赖] 必须开启，确保传输仅在受信任的私有网络内进行 | [`core.rs:596`](../easytier/src/core.rs#L596) |
+| `--file-relay-limit` | u64 (Bytes) | `0` (Unlimited) | [新增] 私有中继大小限制，防止误用带宽紧张的私有中继 | [`core.rs:654`](../easytier/src/core.rs#L654) |
+| `--file-foreign-limit` | u64 (Bytes) | `4194304` (4MB) | [新增] 跨网中继大小限制（更严格），保护公共资源 | [`core.rs:657`](../easytier/src/core.rs#L657) |
+| `--enable-file-relay` | bool | `false` | [新增] 中继节点是否转发文件传输请求 | [`core.rs:661`](../easytier/src/core.rs#L661) |
+| `--disable-file-transfer-relay` | bool | `false` | [新增] 接收端拒绝经由中继转发的文件传输（节省流量） | [`core.rs:644`](../easytier/src/core.rs#L644) |
+| `--foreign-relay-bps-limit` | u64 (Bytes/s) | `Unlimited` | [现有] 跨网中继的带宽速率限制 | [`core.rs:552`](../easytier/src/core.rs#L552) |
 
 #### 限流策略详解 (Limit Hierarchy)
-
-为了平衡私有网络的灵活性和公共中继的安全性，限制策略采用**层层过滤**机制，而非简单的参数覆盖：
-
-1. **总开关 (`--enable-file-relay`)**：优先级最高。若为 `false`，拒绝所有中继传输。
-2. **私有中继**：受 `--file-relay-limit` 限制（默认 100MB）。
-3. **公共/跨网中继**：**同时**受 `--file-relay-limit` 和 `--file-foreign-limit` 限制。实际生效限额为两者的**最小值**（通常取决于更严格的 `--file-foreign-limit`，默认 10MB）。
-
-这种设计确保了即使你配置了宽松的中继策略，跨网流量依然会被默认的严格策略拦截，防止带宽滥用。
+ 
+为了平衡私有网络的灵活性和公共中继的安全性，将配置逻辑分为两个核心场景：
+ 
+**场景一：自建私有中继 (My Relay, My Rules)**
+*   **配置目标**：允许文件在我的设备间通过我自己搭建的中继传输。
+*   **关键参数**：
+    *   `--enable-file-relay true`: 中继节点主动开启转发功能（默认关闭）。
+    *   `--file-relay-limit <BYTES>`: 设置允许的最大文件大小（默认 0/无限）。
+    *   `--disable-file-transfer-relay`: 接收端拒绝非直连（P2P）的文件传输。防止流量意外走带宽紧张的私有中继。
+*   **说明**：这是最宽松的模式，信任链覆盖所有节点，依靠同名同密网络。
+ 
+**场景二：使用公共/他人中继 (Protecting Others & Self)**
+*   **配置目标**：防止公共中继被滥用，同时保护自己不通过昂贵链路传大文件。
+*   **作为中继提供者（保护自己）**：
+    *   `--file-foreign-limit <BYTES>`: 对非本网络（Foreign）的流量施加更严格的大小限制（默认 4MB）。
+    *   `--foreign-relay-bps-limit <BYTES/S>`: 进一步限制跨网流量的带宽速率，防止拥塞。
+*   **作为终端用户（保护自己）**：
+    *   `--disable-file-transfer-relay`: 接收端拒绝非直连（P2P）的文件传输。防止 P2P 打洞失败后，流量意外走公共中继消耗流量或产生费用。
+ 
+限制取**最小值**。如果流量跨网（Foreign），则同时受 `--file-relay-limit`（基础限制）和 `--file-foreign-limit`（跨网限制）的双重约束。
 
 ### 为什么不更新 README？(Why No README Update?)
 
@@ -157,18 +171,18 @@ easytier-core ... --file-foreign-limit 5
 我编写了完整的测试套件和交互式演示脚本来验证功能：
 
 1. **自动化测试**：
-   位于 `easytier-test/` 目录下，包含基础 P2P、中继策略、断点续传等测试。
+   测试脚本已开源在 [Thankyou-Cheems/common-scripts](https://github.com/Thankyou-Cheems/common-scripts/tree/master/easytier-test)。
    ```bash
-   # 运行全量测试
-   ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
+   # 运行全量测试 (需下载脚本)
+   pwsh ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
    ```
    *注：不带参数运行将跳过需外部中继的测试用例。*
 
 2. **交互式演示**：
-   位于 `scripts/` 目录下，用于手动体验传输流程。
+   同样位于上述仓库中，用于手动体验传输流程。
    ```powershell
    # 启动两个本地节点进行文件传输演示
-   ./scripts/demo_file_transfer_p2p.ps1
+   pwsh ./easytier-test/demo_file_transfer_p2p.ps1
    ```
 
 ---
@@ -254,44 +268,58 @@ Retry the same command to resume if interrupted:
 For self-hosted relays, you might want to allow file forwarding with a limit:
 
 ```bash
-# Allow max 100MB through relay
+# Allow max 100MB (104,857,600 Bytes) through relay
 easytier-core --relay-all-peer-rpc true \
               --enable-file-relay true \
-              --file-relay-limit 100
+              --file-relay-limit 104857600
 ```
 
 For public relays, stick to defaults (disabled) or set a very low limit:
 
 ```bash
-# Restrict foreign traffic
-easytier-core ... --file-foreign-limit 5
+# Restrict foreign traffic (5MB = 5,242,880 Bytes)
+easytier-core ... --file-foreign-limit 5242880
 ```
 
 ---
 
 ## Detailed Changes
 
-### New Configuration Parameters
+### Configuration Parameters
 
-This PR introduces 5 new parameters, all defaulting to off/conservative:
+This PR introduces 4 new parameters and reuses the existing `--private-mode`. All conform to a closed-by-default/conservative policy:
 
 | Parameter | Type | Default | Purpose | Source Code |
 |-----------|------|---------|---------|-------------|
-| `--enable-file-transfer` | bool | `false` | Master switch for file transfer | [`core.rs:646`](../easytier/src/core.rs#L646) |
-| `--private-mode` | bool | `false` | Enforces private network isolation (required for file transfer) | [`core.rs:596`](../easytier/src/core.rs#L596) |
-| `--file-relay-limit` | u64 (MB) | `100` | Max file size via private relay | [`core.rs:654`](../easytier/src/core.rs#L654) |
-| `--file-foreign-limit` | u64 (MB) | `10` | Max file size via foreign relay (stricter) | [`core.rs:657`](../easytier/src/core.rs#L657) |
-| `--enable-file-relay` | bool | `false` | Whether relay nodes forward file transfer RPCs | [`core.rs:661`](../easytier/src/core.rs#L661) |
+| `--enable-file-transfer` | bool | `false` | [NEW] Master switch for file transfer | [`core.rs:646`](../easytier/src/core.rs#L646) |
+| `--private-mode` | bool | `false` | [EXISTING] Required to ensure transfers occur within trusted private networks | [`core.rs:596`](../easytier/src/core.rs#L596) |
+| `--file-relay-limit` | u64 (Bytes) | `0` (Unlimited) | [NEW] Limit for private relay to prevent bandwidth exhaustion | [`core.rs:654`](../easytier/src/core.rs#L654) |
+| `--file-foreign-limit` | u64 (Bytes) | `4194304` (4MB) | [NEW] Stricter limit for foreign/public relays | [`core.rs:657`](../easytier/src/core.rs#L657) |
+| `--enable-file-relay` | bool | `false` | [NEW] Whether relay nodes forward file transfer RPCs | [`core.rs:661`](../easytier/src/core.rs#L661) |
+| `--disable-file-transfer-relay` | bool | `false` | [NEW] Reject incoming file transfers if relayed (save bandwidth) | [`core.rs:644`](../easytier/src/core.rs#L644) |
+| `--foreign-relay-bps-limit` | u64 (Bytes/s) | `Unlimited` | [EXISTING] Bandwidth rate limit for foreign relay traffic | [`core.rs:552`](../easytier/src/core.rs#L552) |
 
-#### Limit Hierarchy Explained
-
-To balance private network flexibility with public relay security, the limit policy uses a **multi-layered filtering** mechanism rather than simple parameter overwriting:
-
-1. **Master Switch (`--enable-file-relay`)**: Highest priority. If `false`, all relayed transfers are rejected.
-2. **Private Relay**: Subject to `--file-relay-limit` (default 100MB).
-3. **Public/Foreign Relay**: Subject to **BOTH** `--file-relay-limit` and `--file-foreign-limit`. The effective limit is the **minimum** of the two (usually the stricter `--file-foreign-limit`, default 10MB).
-
-This design ensures that even if you configure a generous relay policy for your own nodes, cross-network traffic remains restricted by default to prevent bandwidth abuse.
+#### Limit Hierarchy
+ 
+To balance private network flexibility with public relay security, we categorize configuration logic into two core scenarios:
+ 
+**Scenario 1: Self-hosted/Private Relay (My Relay, My Rules)**
+*   **Goal**: Allow file transfers between my devices via my own relay.
+*   **Key Parameters**:
+    *   `--enable-file-relay true`: The relay node actively enables forwarding (default off).
+    *   `--file-relay-limit <BYTES>`: Set maximum allowed file size (default 0/Unlimited).
+    *   `--disable-file-transfer-relay`: Receiver proactively rejects non-P2P transfers. Prevents accidental data consumption via private relays.
+*   **Context**: This is the most permissive mode, relying on the trust relationship within a private network.
+ 
+**Scenario 2: Using Public/Third-party Relay (Protecting Others & Self)**
+*   **Goal**: Prevent public relay abuse while protecting oneself from expensive large transfers.
+*   **As Relay Provider (Protecting Self)**:
+    *   `--file-foreign-limit <BYTES>`: Apply stricter size limits to traffic from outside the network (Foreign) (default 4MB).
+    *   `--foreign-relay-bps-limit <BYTES/S>`: Further limit bandwidth rate for cross-network traffic to prevent congestion.
+*   **As End-User (Protecting Self)**:
+    *   `--disable-file-transfer-relay`: Receiver proactively rejects non-P2P transfers. Prevents accidental data consumption via public relays if P2P fails.
+ 
+Limits apply as the **minimum**. If traffic is cross-network (Foreign), it is constrained by both `--file-relay-limit` (Basic) and `--file-foreign-limit` (Foreign).
 
 ### Why No README Update?
 
@@ -333,47 +361,18 @@ Implemented using gRPC-like definitions in [`file_transfer.proto`](../easytier/s
 I have included a comprehensive test suite and an interactive demo script:
 
 1. **Automated Tests**:
-   Located in `easytier-test/`, covering P2P transfer, relay policies, resumability, etc.
+   Scripts are available at [Thankyou-Cheems/common-scripts](https://github.com/Thankyou-Cheems/common-scripts/tree/master/easytier-test).
    ```bash
-   # Run full test suite (requires external relay for some tests)
-   ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
+   # Run full test suite (requires script download)
+   pwsh ./easytier-test/run_tests.ps1 -PublicRelayHost <RELAY_IP>
    ```
    *Note: Running without arguments skips tests requiring an external relay.*
 
 2. **Interactive Demo**:
-   Located in `scripts/`, for manual verification of the user experience.
+   Also available in the repository above, for manual verification.
    ```powershell
    # Start two local nodes for file transfer demo
-   ./scripts/demo_file_transfer_p2p.ps1
+   pwsh ./easytier-test/demo_file_transfer_p2p.ps1
    ```
 
 All test scripts pass locally.
-ript:
-
-1. **Automated Tests**:
-   Located in `easytier-test/`, covering P2P transfer, relay policies, resumability, etc.
-   ```bash
-   # Run full test suite
-   ./easytier-test/run_tests.ps1
-   ```
-
-2. **Interactive Demo**:
-   Located in `scripts/`, for manual verification of the user experience.
-   ```powershell
-   # Start two local nodes for file transfer demo
-   ./scripts/demo_file_transfer_p2p.ps1
-   ```
-
-All test scripts pass locally.
-
-<details>
-<summary>Click to view test details</summary>
-
-- [x] `test_transfer_p2p_basic` - Basic P2P transfer
-- [x] `test_transfer_p2p_large` - 20MB file handling
-- [x] `test_transfer_relay_policy` - Relay control policies
-- [x] `test_transfer_relay_limits` - Size limit enforcement
-- [x] `test_transfer_security_gates` - Private mode & switches
-- [x] `test_transfer_resumability` - Interrupt/Resume logic
-
-</details>
