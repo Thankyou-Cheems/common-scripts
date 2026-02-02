@@ -10,15 +10,30 @@ function Log-Success([string]$Message) { Write-Host "[SUCCESS] $Message" -Foregr
 function Log-Warn([string]$Message) { Write-Host "[WARN] $Message" -ForegroundColor Yellow }
 function Log-Error([string]$Message) { Write-Host "[ERROR] $Message" -ForegroundColor Red }
 
-function Get-LanIp {
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
-            $_.InterfaceAlias -notmatch "Loopback|Pseudo|vEthernet" -and 
-            $_.IPAddress -notmatch "^169\.254" -and 
-            $_.IPAddress -notmatch "^127\." 
+param(
+    [string]$LanIp = ""
+)
+
+function Get-LanIp([string]$Preferred = "") {
+    if ($Preferred) { return $Preferred }
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+            $_.InterfaceAlias -notmatch "Loopback|Pseudo|vEthernet" -and
+            $_.IPAddress -notmatch "^169\.254" -and
+            $_.IPAddress -notmatch "^127\."
         } | Select-Object -First 1).IPAddress
-    
-    if (-not $ip) { return "127.0.0.1" }
+
+    if (-not $ip) {
+        throw "Unable to determine LAN IP. Provide -LanIp explicitly."
+    }
     return $ip
+}
+
+function Get-FreeTcpPort([int]$StartPort, [int]$EndPort) {
+    for ($p = $StartPort; $p -le $EndPort; $p++) {
+        $inUse = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue
+        if (-not $inUse) { return $p }
+    }
+    throw "No free TCP port found in range ${StartPort}-${EndPort}"
 }
 
 function Wait-ForNode([System.Diagnostics.Process]$Proc, [string]$CliBin, [int]$RpcPort, [int]$TimeoutSec = 10) {
@@ -96,11 +111,11 @@ $CoreBin = "$BinDir/easytier-core.exe"
 $CliBin = "$BinDir/easytier-cli.exe"
 
 # Configuration
-$RpcNodeA = 15888
-$RpcNodeB = 15889
-$ListenA = 11010
-$ListenB = 11011
-$LanIp = Get-LanIp
+$RpcNodeA = Get-FreeTcpPort 15888 15950
+$RpcNodeB = Get-FreeTcpPort 15951 16010
+$ListenA = Get-FreeTcpPort 11010 11080
+$ListenB = Get-FreeTcpPort 11081 11150
+$LanIp = Get-LanIp $LanIp
 
 Log-Info "Using LAN IP: $LanIp"
 Log-Info "Binaries from: $BinDir"

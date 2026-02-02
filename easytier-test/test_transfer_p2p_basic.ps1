@@ -17,25 +17,30 @@ New-TestFile "test_p2p.txt" -SizeBytes 64
 "P2P Transfer Test Content" | Out-File -NoNewline -Encoding utf8 test_p2p.txt
 
 Log-Step "Starting Nodes"
-# Node A (Sender): 11010, RPC 15888
-Start-ETNode -Name "node_a" -RpcPort 15888 -TcpPort 11010 `
+$portA = Get-FreeTcpPort 11010 11080
+$portB = Get-FreeTcpPort 11081 11150
+$rpcA = Get-FreeTcpPort 15888 15950
+$rpcB = Get-FreeTcpPort 15951 16010
+
+# Node A (Sender)
+Start-ETNode -Name "node_a" -RpcPort $rpcA -TcpPort $portA `
     -ExtraArgs @("--enable-file-transfer", "--private-mode", "true")
 
-# Node B (Receiver): 11020, RPC 15889
-Start-ETNode -Name "node_b" -RpcPort 15889 -TcpPort 11020 `
-    -Peers @("tcp://${HostIP}:11010") `
+# Node B (Receiver)
+Start-ETNode -Name "node_b" -RpcPort $rpcB -TcpPort $portB `
+    -Peers @("tcp://${HostIP}:$portA") `
     -ExtraArgs @("--enable-file-transfer", "--private-mode", "true") `
     -WorkDir $NodeBDir
 
 Log-Step "Waiting for P2P Connection"
-$targetPeerId = Get-NodePeerId 15889
-$peer = Wait-ForPeer 15888 $targetPeerId "p2p" 60
+$targetPeerId = Get-NodePeerId $rpcB
+$peer = Wait-ForPeer $rpcA $targetPeerId "p2p" 60
 $PEER_ID = $peer.id
 
 Start-Sleep -Seconds 2
 
 Log-Step "Executing Transfer"
-$out = Invoke-FileSend 15888 $PEER_ID "test_p2p.txt"
+$out = Invoke-FileSend $rpcA $PEER_ID "test_p2p.txt"
 Log-Info "CLI Output: $out"
 
 Log-Step "Verification"

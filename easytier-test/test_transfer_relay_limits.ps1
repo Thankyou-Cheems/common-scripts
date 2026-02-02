@@ -111,8 +111,7 @@ if ($UseLocalForeignRelay) {
     Start-ETNode -Name "node_c" -RpcPort $rpcC -TcpPort $portC `
         -ExtraArgs @(
         "--network-name", "foreign_net",
-        "--relay-all-peer-rpc", "true", 
-        "--enable-file-relay", "true"
+        "--relay-all-peer-rpc", "true"
     ) `
         -WorkDir $NodeCDir
     Wait-PortListen $portC 10

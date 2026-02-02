@@ -17,6 +17,14 @@ if (-not $RelayPort -or $RelayPort -eq 0) { $RelayPort = $DEFAULT_RELAY_PORT }
 if (-not $PublicRelayHost) { $PublicRelayHost = $DEFAULT_RELAY_HOST }
 if (-not $PublicRelayPort -or $PublicRelayPort -eq 0) { $PublicRelayPort = $DEFAULT_RELAY_PORT }
 
+# If only public relay is provided, reuse it for relay policy tests.
+if (($RelayHost -eq $DEFAULT_RELAY_HOST -and $PublicRelayHost -ne $DEFAULT_RELAY_HOST) -or (-not $RelayHost)) {
+    $RelayHost = $PublicRelayHost
+}
+if (($RelayPort -eq $DEFAULT_RELAY_PORT -and $PublicRelayPort -ne $DEFAULT_RELAY_PORT) -or (-not $RelayPort) -or ($RelayPort -eq 0)) {
+    $RelayPort = $PublicRelayPort
+}
+
 Log-Step "Starting Full Registry Suite"
 $LanIp = Get-LanIp $LanIp
 

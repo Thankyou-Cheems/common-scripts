@@ -173,6 +173,21 @@ function Start-ETNode {
         "--network-secret", "test_pwd"
     )
 
+    function Remove-ArgPair([string]$Flag) {
+        $idx = [Array]::IndexOf($argsList, $Flag)
+        if ($idx -ge 0 -and $idx + 1 -lt $argsList.Count) {
+            $prefix = @()
+            if ($idx -gt 0) { $prefix = $argsList[0..($idx - 1)] }
+            $suffix = @()
+            if ($idx + 2 -le $argsList.Count - 1) {
+                $suffix = $argsList[($idx + 2)..($argsList.Count - 1)]
+            }
+            Set-Variable -Name argsList -Scope 1 -Value @($prefix + $suffix)
+        }
+    }
+    if ($ExtraArgs -contains "--network-name") { Remove-ArgPair "--network-name" }
+    if ($ExtraArgs -contains "--network-secret") { Remove-ArgPair "--network-secret" }
+
     if ($Peers.Count -gt 0) {
         foreach ($p in $Peers) {
             # SANITY CHECK for 127.0.0.1 peer URIs

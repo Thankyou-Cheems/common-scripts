@@ -7,8 +7,10 @@ param(
 Log-Step "Initialization"
 $HostIP = Get-LanIp $LanIp
 
-$portA = 15110; $rpcA = 19988
-$portB = 15120; $rpcB = 19989
+$portA = Get-FreeTcpPort 15110 15180
+$portB = Get-FreeTcpPort 15181 15250
+$rpcA = Get-FreeTcpPort 19988 20050
+$rpcB = Get-FreeTcpPort 20051 20110
 $NodeADir = Join-Path (Get-Location).Path "node_a_dir"
 $NodeBDir = Join-Path (Get-Location).Path "node_b_dir"
 

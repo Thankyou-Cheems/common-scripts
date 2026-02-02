@@ -44,13 +44,12 @@ function Run-Cleanup {
 function Setup-RelayNode {
     if ($UseLocalForeignRelay) {
         # Local Foreign Relay (Node C)
-        # Note: Foreign relays usually need manual setup of network names to simulate foreign-ness, 
-        # but here we use a separate network name "foreign_net" and enable relay forwarding.
+        # Note: Foreign relays usually need manual setup of network names to simulate foreign-ness,
+        # but here we use a separate network name "foreign_net".
         Start-ETNode -Name "node_c" -RpcPort $rpcC -TcpPort $portC `
             -ExtraArgs @(
             "--network-name", "foreign_net",
-            "--relay-all-peer-rpc", "true", 
-            "--enable-file-relay", "true"
+            "--relay-all-peer-rpc", "true"
         ) `
             -WorkDir $NodeCDir
         Wait-PortListen $portC 10
@@ -64,7 +63,7 @@ New-TestFile "relay_test.txt" -SizeBytes 11
 "Hello Relay" | Out-File -Encoding utf8 relay_test.txt
 
 # --- TEST 1 ---
-Log-Step "Test 1: Relay Allowed (Default)"
+Log-Step "Test 1: Relay Forwarding (Default Behavior)"
 
 Setup-RelayNode
 
@@ -95,7 +94,7 @@ Log-Success "Test 1 Passed: File received via relay."
 Run-Cleanup
 
 # --- TEST 2 ---
-Log-Step "Test 2: Relay Disabled (Receiver Side)"
+Log-Step "Test 2: Receiver Rejects Relay Transfer"
 
 New-TestFile "relay_test.txt" -SizeBytes 11
 "Hello Relay" | Out-File -Encoding utf8 relay_test.txt
@@ -113,7 +112,7 @@ Start-ETNode -Name "node_b" -RpcPort $rpcB -TcpPort $portB `
     "--enable-file-transfer", 
     "--private-mode", "true", 
     "--disable-p2p",
-    "--disable-file-transfer-relay"
+    "--disable-file-from-relay"
 ) `
     -WorkDir $NodeBDir
 
