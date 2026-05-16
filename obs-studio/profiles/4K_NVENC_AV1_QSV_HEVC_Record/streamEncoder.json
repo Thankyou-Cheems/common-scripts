@@ -1,0 +1,1 @@
+{"rate_control":"CBR","bitrate":24000,"keyint_sec":2,"preset":"p5","tuning":"hq","multipass":"qres","profile":"main","lookahead":false,"psycho_aq":true,"bframes":2,"gpu":0}
