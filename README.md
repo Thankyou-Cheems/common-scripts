@@ -18,7 +18,8 @@ obs-studio/
 ### Codex
 
 - `scripts/codex/setup-codex-skills-wsl.sh`: Point WSL Codex to the Windows skills directory by setting `CODEX_HOME` in `~/.bashrc`.
-- `scripts/codex/switch-codex-runtime.ps1`: Switch Codex Desktop between Windows and WSL runtime wiring, with network guards for IPv4-only proxy/VPS setups.
+- `scripts/codex/switch-codex-runtime.ps1`: Switch Codex Desktop between Windows App-managed agent and WSL runtime wiring, with network guards for IPv4-only proxy/VPS setups.
+- `scripts/codex/repair-codex-history-cwd.ps1`: Normalize Codex transcript and sidebar state `cwd` metadata after moving between WSL `/mnt/<drive>/...` paths and Windows `D:\...` projects.
 
 ### Cog
 
@@ -45,6 +46,47 @@ obs-studio/
 .\scripts\codex\switch-codex-runtime.ps1 windows
 .\scripts\codex\switch-codex-runtime.ps1 wsl -RestartApp
 ```
+
+Windows mode uses the Codex Desktop-managed agent from
+`%LOCALAPPDATA%\OpenAI\Codex\bin`, not a pnpm/global/standalone Codex CLI shim.
+
+#### Codex History Workspace Repair
+
+When Codex Desktop is moved between WSL and Windows runtime modes, old threads
+can remain indexed under `/mnt/d/...`, `C:\mnt\d\...`, or Windows extended paths
+such as `\\?\D:\...`. The sidebar may then stop grouping recent threads under
+their real Windows projects, or records may briefly appear after restart and
+then disappear again after opening a thread.
+
+The repair script fixes both layers:
+
+- transcript source metadata in `~/.codex/sessions/**/*.jsonl`:
+  `session_meta`, `turn_context`, `cwd`, `workspace_roots`, and writable roots
+- sidebar/state indexes in `state_5.sqlite`, legacy `sqlite/state_5.sqlite`, and
+  selected path caches in `.codex-global-state.json`
+
+Preview the current month first:
+
+```powershell
+.\scripts\codex\repair-codex-history-cwd.ps1 -WhatIf
+```
+
+Repair a specific migration month and restart Codex afterward:
+
+```powershell
+.\scripts\codex\repair-codex-history-cwd.ps1 -SessionMonth 2026-06 -RestartApp
+```
+
+For a full historical cleanup, use:
+
+```powershell
+.\scripts\codex\repair-codex-history-cwd.ps1 -AllSessions -RestartApp
+```
+
+The script backs up every changed transcript/state file under
+`%USERPROFILE%\.codex\backups\history-cwd-normalize-*`. It only rewrites
+structured metadata lines in transcripts; user messages, command output, and
+normal conversation content are left untouched.
 
 #### Codex Runtime Network Guard
 

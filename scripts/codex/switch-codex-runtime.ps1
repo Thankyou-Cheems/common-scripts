@@ -8,6 +8,8 @@ param(
 
     [switch]$ConfigureNetworkGuards,
 
+    [switch]$UpdateCli,
+
     [switch]$AllowIpv6
 )
 
@@ -16,7 +18,8 @@ $ErrorActionPreference = "Stop"
 $UserProfile = [Environment]::GetFolderPath("UserProfile")
 $ConfigPath = Join-Path $UserProfile ".codex\config.toml"
 
-$WindowsCodexCli = Join-Path $UserProfile "AppData\Local\Programs\OpenAI\Codex\bin\codex.exe"
+$NetshPath = Join-Path $env:SystemRoot "System32\netsh.exe"
+$WindowsCodexBinRoot = Join-Path $UserProfile "AppData\Local\OpenAI\Codex\bin"
 $WslCodexShim = Join-Path $UserProfile "AppData\Local\pnpm\bin\codex"
 
 function Test-IsAdministrator {
@@ -57,15 +60,44 @@ function Get-LatestNodeRepl {
     return $candidate.FullName
 }
 
+function Get-LatestAppCodexAgent {
+    if (-not (Test-Path -LiteralPath $WindowsCodexBinRoot)) {
+        throw "Missing Codex app bin directory: $WindowsCodexBinRoot"
+    }
+
+    $candidate = Get-ChildItem -LiteralPath $WindowsCodexBinRoot -Filter codex.exe -Recurse -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
+    if (-not $candidate) {
+        throw "Missing Codex app-managed agent under: $WindowsCodexBinRoot"
+    }
+
+    return $candidate.FullName
+}
+
+$WindowsCodexCli = Get-LatestAppCodexAgent
 $WindowsNodeRepl = Get-LatestNodeRepl
 $WslNodeRepl = ConvertTo-WslPath -WindowsPath $WindowsNodeRepl
 
 function Get-WindowsIpv6PrefixPolicy {
-    $lines = & netsh.exe interface ipv6 show prefixpolicies 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $NetshPath
+    $startInfo.Arguments = "interface ipv6 show prefixpolicies"
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.UseShellExecute = $false
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $process.StandardError.ReadToEnd() | Out-Null
+    $process.WaitForExit()
+
+    if ($process.ExitCode -ne 0) {
         return @()
     }
 
+    $lines = $stdout -split "\r?\n"
     return @(
         foreach ($line in $lines) {
             if ($line -match "^\s*(\d+)\s+(\d+)\s+(.+?)\s*$") {
@@ -101,12 +133,12 @@ function Test-WindowsPreferIpv4 {
 
 function Set-WindowsPreferIpv4 {
     if (Test-IsAdministrator) {
-        & netsh.exe interface ipv6 set prefixpolicy prefix="::ffff:0:0/96" precedence=100 label=4 store=persistent | Out-Null
+        & $NetshPath interface ipv6 set prefixpolicy prefix="::ffff:0:0/96" precedence=100 label=4 store=persistent | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to set Windows IPv4-mapped prefix policy."
         }
 
-        & netsh.exe interface ipv6 set prefixpolicy prefix="::/0" precedence=40 label=1 store=persistent | Out-Null
+        & $NetshPath interface ipv6 set prefixpolicy prefix="::/0" precedence=40 label=1 store=persistent | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to set Windows IPv6 default prefix policy."
         }
@@ -114,11 +146,12 @@ function Set-WindowsPreferIpv4 {
         return
     }
 
-    $script = @'
+$script = @'
 $ErrorActionPreference = "Stop"
-netsh interface ipv6 set prefixpolicy prefix=::ffff:0:0/96 precedence=100 label=4 store=persistent
+$netsh = Join-Path $env:SystemRoot "System32\netsh.exe"
+& $netsh interface ipv6 set prefixpolicy prefix=::ffff:0:0/96 precedence=100 label=4 store=persistent
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-netsh interface ipv6 set prefixpolicy prefix=::/0 precedence=40 label=1 store=persistent
+& $netsh interface ipv6 set prefixpolicy prefix=::/0 precedence=40 label=1 store=persistent
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 exit 0
 '@
@@ -191,6 +224,73 @@ function Invoke-WslShellScript {
         ExitCode = $LASTEXITCODE
         Output   = @($output)
     }
+}
+
+function Get-CachedLatestCodexCliVersion {
+    $versionCache = Join-Path $UserProfile ".codex\version.json"
+    if (-not (Test-Path -LiteralPath $versionCache)) {
+        return $null
+    }
+
+    try {
+        $metadata = Get-Content -LiteralPath $versionCache -Raw | ConvertFrom-Json
+        return [string]$metadata.latest_version
+    } catch {
+        Write-Warning "Could not read Codex version cache: $versionCache"
+        return $null
+    }
+}
+
+function Get-WslCodexCliVersion {
+    $output = & wsl.exe sh -lc "codex --version 2>/dev/null"
+    if ($LASTEXITCODE -ne 0) {
+        throw "WSL codex is not available. Run: wsl.exe sh -lc 'npm i -g @openai/codex'"
+    }
+
+    $text = (@($output) -join "`n")
+    if ($text -notmatch "(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)") {
+        throw "Could not parse WSL codex version from: $text"
+    }
+
+    return $matches[1]
+}
+
+function Update-WslCodexCli {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    if ($Version -notmatch "^[0-9A-Za-z.+-]+$") {
+        throw "Refusing to install suspicious Codex CLI version string: $Version"
+    }
+
+    Write-Host "Updating WSL Codex CLI to $Version..."
+    & wsl.exe sh -lc "npm install -g @openai/codex@$Version"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to update WSL Codex CLI to $Version."
+    }
+}
+
+function Assert-WslCodexCliFresh {
+    $currentVersion = Get-WslCodexCliVersion
+    $latestVersion = Get-CachedLatestCodexCliVersion
+
+    if ([string]::IsNullOrWhiteSpace($latestVersion) -or $currentVersion -eq $latestVersion) {
+        return $currentVersion
+    }
+
+    if ($UpdateCli) {
+        Update-WslCodexCli -Version $latestVersion
+        return Get-WslCodexCliVersion
+    }
+
+    throw @"
+WSL Codex CLI is $currentVersion, but the cached latest version is $latestVersion.
+After a Codex App update this mismatch can break tool schemas, including:
+  Invalid request: missing field 'inputSchema'
+Run this once, then retry:
+  .\scripts\codex\switch-codex-runtime.ps1 wsl -UpdateCli
+"@
 }
 
 function Set-WslIpv4Only {
@@ -342,6 +442,40 @@ function Set-EnvTomlLine {
     return $Text.Insert($lineStart + 1, "$line`n")
 }
 
+function Get-NodeReplWslEnv {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+
+    $section = [regex]::Match($Text, "(?ms)^\[mcp_servers\.node_repl\.env\]\s*(.*?)(?=^\[|\z)")
+    if (-not $section.Success) {
+        throw "Could not find [mcp_servers.node_repl.env] in $ConfigPath"
+    }
+
+    $names = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+
+    foreach ($name in @("WT_SESSION", "WT_PROFILE_ID")) {
+        if ($seen.Add($name)) {
+            $names.Add($name)
+        }
+    }
+
+    foreach ($line in ($section.Groups[1].Value -split "\r?\n")) {
+        if ($line -match "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=") {
+            $name = $matches[1]
+            if ($name -eq "WSLENV") {
+                continue
+            }
+            if ($seen.Add($name)) {
+                $names.Add("$name/w")
+            }
+        }
+    }
+
+    return ($names -join ":")
+}
+
 function Remove-TomlLine {
     param(
         [Parameter(Mandatory = $true)][string]$Text,
@@ -359,7 +493,7 @@ Assert-NetworkGuards
 
 if ($Mode -eq "windows") {
     if (-not (Test-Path -LiteralPath $WindowsCodexCli)) {
-        throw "Missing Windows Codex CLI: $WindowsCodexCli"
+        throw "Missing Windows Codex app-managed agent: $WindowsCodexCli"
     }
     if (-not (Test-Path -LiteralPath $WindowsNodeRepl)) {
         throw "Missing Windows node_repl: $WindowsNodeRepl"
@@ -370,14 +504,12 @@ if ($Mode -eq "windows") {
     $ConfigCodexCli = $WindowsCodexCli
     $UserCodexCli = $WindowsCodexCli
     $UserWslEnv = $null
+    $ConfigWslEnv = $null
 } else {
     if (-not (Test-Path -LiteralPath $WslCodexShim)) {
         throw "Missing WSL Codex shim: $WslCodexShim"
     }
-    $wslCheck = & wsl.exe sh -lc "command -v codex >/dev/null && codex --version >/dev/null"
-    if ($LASTEXITCODE -ne 0) {
-        throw "WSL codex is not available. Run: wsl.exe sh -lc 'npm i -g @openai/codex'"
-    }
+    $WslCodexVersion = Assert-WslCodexCliFresh
 
     $RunInWsl = "true"
     $NodeReplCommand = $WslNodeRepl
@@ -396,7 +528,8 @@ $content = Set-FirstTomlLine -Text $content -Pattern "^command\s*=.*$" -Replacem
 $content = Set-EnvTomlLine -Text $content -Key "CODEX_CLI_PATH" -Value $ConfigCodexCli
 
 if ($Mode -eq "wsl") {
-    $content = Set-EnvTomlLine -Text $content -Key "WSLENV" -Value $UserWslEnv
+    $ConfigWslEnv = Get-NodeReplWslEnv -Text $content
+    $content = Set-EnvTomlLine -Text $content -Key "WSLENV" -Value $ConfigWslEnv
 } else {
     $content = Remove-TomlLine -Text $content -Key "WSLENV"
 }
@@ -417,6 +550,11 @@ if ($UserWslEnv) {
 Write-Host "Switched Codex runtime to $Mode."
 Write-Host "Config backup: $backupPath"
 Write-Host "CODEX_CLI_PATH: $UserCodexCli"
+if ($Mode -eq "wsl") {
+    Write-Host "WSL Codex CLI: $WslCodexVersion"
+} else {
+    Write-Host "Windows Codex agent: $WindowsCodexCli"
+}
 
 if ($RestartApp) {
     $desktopProcesses = Get-Process | Where-Object {
