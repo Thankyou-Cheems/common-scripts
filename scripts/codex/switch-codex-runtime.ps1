@@ -10,7 +10,9 @@ param(
 
     [switch]$UpdateCli,
 
-    [switch]$AllowIpv6
+    [switch]$AllowIpv6,
+
+    [switch]$PersistUserEnvironment
 )
 
 $ErrorActionPreference = "Stop"
@@ -536,20 +538,31 @@ if ($Mode -eq "wsl") {
 
 Set-Content -LiteralPath $ConfigPath -Value $content -NoNewline
 
-[Environment]::SetEnvironmentVariable("CODEX_CLI_PATH", $UserCodexCli, "User")
-$env:CODEX_CLI_PATH = $UserCodexCli
+if ($PersistUserEnvironment) {
+    [Environment]::SetEnvironmentVariable("CODEX_CLI_PATH", $UserCodexCli, "User")
+    $env:CODEX_CLI_PATH = $UserCodexCli
 
-if ($UserWslEnv) {
-    [Environment]::SetEnvironmentVariable("WSLENV", $UserWslEnv, "User")
-    $env:WSLENV = $UserWslEnv
+    if ($UserWslEnv) {
+        [Environment]::SetEnvironmentVariable("WSLENV", $UserWslEnv, "User")
+        $env:WSLENV = $UserWslEnv
+    } else {
+        [Environment]::SetEnvironmentVariable("WSLENV", $null, "User")
+        $env:WSLENV = ""
+    }
 } else {
+    [Environment]::SetEnvironmentVariable("CODEX_CLI_PATH", $null, "User")
     [Environment]::SetEnvironmentVariable("WSLENV", $null, "User")
+    $env:CODEX_CLI_PATH = ""
     $env:WSLENV = ""
 }
 
 Write-Host "Switched Codex runtime to $Mode."
 Write-Host "Config backup: $backupPath"
-Write-Host "CODEX_CLI_PATH: $UserCodexCli"
+if ($PersistUserEnvironment) {
+    Write-Host "User CODEX_CLI_PATH: $UserCodexCli"
+} else {
+    Write-Host "User CODEX_CLI_PATH/WSLENV cleared. Pass -PersistUserEnvironment to persist them."
+}
 if ($Mode -eq "wsl") {
     Write-Host "WSL Codex CLI: $WslCodexVersion"
 } else {
